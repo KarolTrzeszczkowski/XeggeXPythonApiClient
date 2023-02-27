@@ -1,3 +1,5 @@
+"""The module for accessing XeggeX API written in asynchronous python"""
+
 import json
 import time
 import hashlib, hmac
@@ -43,7 +45,8 @@ class Auth():
         }
         return headers
 
-    def ws_auth_message(self):
+    def ws_auth_message(self) -> str:
+        """Creates a login string for websocket."""
         nonce = ''.join(random.choice(string.ascii_letters+string.digits) for i in range(20))
         return json.dumps({
             'method':'login',
@@ -56,6 +59,10 @@ class Auth():
         })
 
 def private(func):
+    """Decorator for declaring functions that require API keys.
+
+    A decorated function will throw an assertion error if API keys aren't placed in `xeggex_settings.json` file.
+    """
     @wraps(func)
     async def wrap(*args, **kwargs):
         assert args[0].auth is not None, "Auth not found. You can't use Account endpoints without specifying API keys. Specify \"access_key\" and \"secret_key\" in \"xeggex_settings.json\" file."
@@ -63,6 +70,7 @@ def private(func):
     return wrap
 
 class XeggeXClient():
+    """The class that for accessing XeggeX exchange API."""
     def __init__(self):
         try:
             with open('xeggex_settings.json') as f:
@@ -74,7 +82,8 @@ class XeggeXClient():
         self.ws_endpoint = 'wss://ws.xeggex.com'
         self.session = aiohttp.ClientSession()
 
-    async def get(self, path, params={}):
+    async def get(self, path: str, params: dict = {}):
+        """The basic GET query, inserts authorization header."""
         params_str = '?'+urlencode(params) if params else ''
         async with self.session.get(
             self.endpoint+path+params_str,
@@ -83,7 +92,8 @@ class XeggeXClient():
             response = await resp.json()
         return response
 
-    async def post(self, path, data):
+    async def post(self, path: str, data: dict):
+        """The basic POST query, inserts authorization header"""
         data_str = json.dumps(data,separators=(',',':'))
         async with self.session.post(
             self.endpoint+path,
@@ -94,10 +104,21 @@ class XeggeXClient():
             return response
 
     def websocket_context(self):
-        '''Get an entry point to a websocket, to be used with \"async with\"'''
+        """Gets an entry point to a websocket, to be used with `async with ... as ws:`."""
         return self.session.ws_connect(self.ws_endpoint)
 
-    async def ws_stream_generator(self, ws, message, response_methods):
+    async def ws_stream_generator(self, ws: ClientWebSocketResponse,
+                                  message: str, response_methods: List[str]):
+        """Creates a stream subscribtion in a form of a generator.
+
+        The generator is meant to be iterated over with `async for` or `anext` builtin.
+
+        Args:
+            ws: Websocket response object.
+            message: Stream subsctiption message.
+            response_methods: The list of \"method\" keys returned from as the stream response.
+                Allows you to drop some parts of the communication, like the initial snapshot.
+        """
         await ws.send_str(message)
         while True:
             msg = await ws.receive()
@@ -116,7 +137,12 @@ class XeggeXClient():
 # Websocket methods
 
     @private
-    async def ws_login(self, ws):
+    async def ws_login(self, ws: ClientWebSocketResponse):
+        """Executes a login on the websocket.
+
+        Args:
+            ws: Websocket response object.
+        """
         await ws.send_str(self.auth.ws_auth_message)
         msg = await ws.receive()
         return msg.json()
@@ -124,15 +150,27 @@ class XeggeXClient():
     @private
     async def ws_create_order(
         self,
-        ws,
-        symbol,
-        side,
-        quantity,
-        price = None,
-        order_type = None,
-        user_provided_id = None,
-        strict_validate = None,
+        ws: ClientWebSocketResponse,
+        symbol: str,
+        side: str,
+        quantity: str,
+        price: Optional[str] = None,
+        order_type: Optional[str] = None,
+        user_provided_id: Optional[str] = None,
+        strict_validate: Optional[bool] = None,
     ):
+        """Creates an order through a websocket.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\"
+            side: Order side, \"sell\" or \"buy\".
+            quantity: Quantity of the base asset.
+            price: Price in terms of the quote asset required for the limit order.
+            order_type: "limit" or \"market\" ordeer type.
+            user_provided_id: Optional user-defined ID.
+            strict_validate: Strict validate amount and price precision without truncation. Setting true will return an error if your quantity/price exceeds the correct decimal places. Default false will truncate values to allowed number of decimal places.
+        """
         message = {
             'method': 'newOrder',
             'params': {
@@ -154,7 +192,19 @@ class XeggeXClient():
         return msg.json()
 
     @private
-    async def ws_cancel_order(self, ws, order_id = None, user_provided_id = None):
+    async def ws_cancel_order(
+        self,
+        ws: ClientWebSocketResponse,
+        order_id: str = None,
+        user_provided_id: str = None
+    ):
+        """Cancel order through a websocket.
+
+        Args:
+            ws: Websocket response object.
+            order_id: Exchange internal order ID.
+            user_provided_id: Optional user-defined ID.
+        """
         message = {'method': 'cancelOrder',
                    'params': {'orderId': order_id, 'userProvidedId': user_provided_id}}
         error_msg = "You have to unambiguously specify order ID to cancel it"
@@ -168,7 +218,13 @@ class XeggeXClient():
         return msg.json()
 
     @private
-    async def ws_get_active_orders(self, ws, symbol = None):
+    async def ws_get_active_orders(self, ws: ClientWebSocketResponse, symbol: str = None):
+        """Get active orders through a websocket.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         message = {'method': 'getOrders', 'params': {'symbol': symbol}}
         if message['params']['symbol'] is None:
             message['params'].pop('symbol')
@@ -177,32 +233,58 @@ class XeggeXClient():
         return msg.json()
 
     @private
-    async def ws_get_trading_balance(self, ws):
+    async def ws_get_trading_balance(self, ws: ClientWebSocketResponse):
+        """Get trading balance through a websocket.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method':'getTradingBalance', 'params':{}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    async def ws_get_assets_list(self, ws):
+    async def ws_get_assets_list(self, ws: ClientWebSocketResponse):
+        """Get assets list through a websocket.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method':'getAssets', 'params':{}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    async def ws_get_asset(self, ws, ticker):
+    async def ws_get_asset(self, ws: ClientWebSocketResponse, ticker: str):
+        """Get asset trhough a websocket.
+
+        Args:
+            ws: Websocket response object.
+            ticker: Currency symbol, for example \"XRG\".
+        """
         message = json.dumps({'method':'getAssets', 'params':{'ticker': ticker}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
+    async def ws_get_markets_list(self, ws: ClientWebSocketResponse):
+        """Get markets list through a websocket.
 
-    async def ws_get_market_list(self, ws):
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method':'getMarkets', 'params':{}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    async def ws_get_market(self, ws, symbol):
+    async def ws_get_market(self, ws: ClientWebSocketResponse, symbol: str):
+        """Get market info through a websocket.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         message = json.dumps({'method':'getMarket', 'params': {'symbol': symbol}})
         await ws.send_str(message)
         msg = await ws.receive()
@@ -210,14 +292,28 @@ class XeggeXClient():
 
     async def ws_get_trade_history(
         self,
-        ws,
-        symbol,
-        limit=None,
-        offset=None,
-        sort=None,
-        history_from=None,
-        history_till=None
+        ws: ClientWebSocketResponse,
+        symbol: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        sort: Optional[str] = None,
+        history_from: Optional[str] = None,
+        history_till: Optional[str] = None
     ):
+        """Get trade history through a websocket.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            limit: Number of entries, (Optional, default: 100, max: 1000).
+            offset: Offset the results by this number (Optional, default: 0).
+            sort: 'ASC' for ascending order, 'DESC' for decending order. (Optional, default: DESC)
+            history_from: This is earliest datetime. (Optional).
+                When using from or till, then both are required.
+            history_till: This is latest datetime. (Optional).
+                When using from or till, then both are required.
+
+        """
         message = {
             'method': 'getTrades',
             'params': {
@@ -240,40 +336,93 @@ class XeggeXClient():
 # Public streams
 
 
-    def subscribe_ticker_generator(self, ws, symbol):
+    def subscribe_ticker_generator(self, ws: ClientWebSocketResponse, symbol: str):
+        """Creates a ticker stream subscribtion in a form of a generator.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         message = json.dumps({'method': 'subscribeTicker', 'params': {'symbol': symbol}})
         return self.ws_stream_generator(ws, message, ['ticker'])
 
-    async def unsubscribe_ticker(self, ws, symbol):
+    async def unsubscribe_ticker(self, ws: ClientWebSocketResponse, symbol: str):
+        """Unsubscribes the ticker stream subscribtion.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method': 'unsubscribeTicker', 'params': {'symbol': symbol}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    def subscribe_orderbook_generator(self, ws, symbol, limit=None):
+    def subscribe_orderbook_generator(
+            self,
+            ws: ClientWebSocketResponse,
+            symbol: str,
+            limit: Optional[int] = None
+    ):
+        """Creates a orderbook stream subscribtion in a form of a generator.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            limit: (Optional) The number of items on each side of the books. Default: 100 
+        """
         message = {'method': 'subscribeOrderbook', 'params': {'symbol': symbol,'limit': limit}}
         if message['params']['limit'] is None:
             message['params'].pop('limit')
         return self.ws_stream_generator(
             ws, json.dumps(message), ['snapshotOrderbook', 'updateOrderbook'])
 
-    async def unsubscribe_orderbook(self, ws, symbol):
+    async def unsubscribe_orderbook(self, ws: ClientWebSocketResponse, symbol: str):
+        """Unsubscribes the orderbook stream subscribtion.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method': 'unsubscribeOrderbook', 'params': {'symbol': symbol}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    def subscribe_trades_generator(self,ws, symbol):
+    def subscribe_trades_generator(self, ws: ClientWebSocketResponse, symbol: str):
+        """Creates a trades stream subscribtion in a form of a generator.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         message = json.dumps({'method': 'subscribeTrades', 'params': {'symbol': symbol}})
         return self.ws_stream_generator(ws, message, ['snapshotTrades', 'updateTrades'])
         
-    async def unsubscribe_trades(self, ws, symbol):
+    async def unsubscribe_trades(self, ws: ClientWebSocketResponse, symbol: str):
+        """Unsubscribes the trades stream subscribtion.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method': 'unsubscribeTrades', 'params': {'symbol': symbol}})
         await ws.send_str(message)
         msg = await ws.receive()
         return msg.json()
 
-    def subscribe_candles_generator(self, ws, symbol, period, limit = None):
+    def subscribe_candles_generator(
+            self,
+            ws: ClientWebSocketResponse,
+            symbol: str,
+            period: int,
+            limit: Optional[int] = None
+    ):
+        """Creates a candles stream subscribtion in a form of a generator.
+
+        Args:
+            ws: Websocket response object.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            period: The candlestick period you would like (Minutes). (5, 15, 30, 60, 180, 240, 480, 720, 1440)
+            limit: Limit the results. (Optional, default: 100)
+        """
         message = {'method': 'subscribeCandles',
                    'params': {'symbol':symbol, 'period': period, 'limit': limit}}
         if message['params']['limit'] is None:
@@ -281,7 +430,13 @@ class XeggeXClient():
         return self.ws_stream_generator(
             ws, json.dumps(message), ['snapshotCandles', 'updateCandles'])
 
-    async def unsubscribe_candles(self, ws, symbol, period):
+    async def unsubscribe_candles(self, ws: ClientWebSocketResponse, symbol: str, period: int):
+        """Unsubscribes the reports stream subscribtion.
+
+        Args:
+            ws: Websocket response object.
+            period: The candlestick period you would like (Minutes). (5, 15, 30, 60, 180, 240, 480, 720, 1440)
+        """
         message = json.dumps({'method': 'unsubscribeCandles',
                               'params': {'symbol': symbol, 'period':period}})
         await ws.send_str(message)
@@ -292,12 +447,22 @@ class XeggeXClient():
 # Private streams
 
     @private
-    def subscribe_reports_generator(self, ws):
+    def ws_subscribe_reports_generator(self, ws: ClientWebSocketResponse):
+        """Creates a reports stream subscribtion in a form of a generator.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method': 'subscribeReports', 'params': {}})
-        return self.ws_stream_generator(ws, message)
+        return self.ws_stream_generator(ws, message, ['activeOrders', 'report'])
 
     @private
-    async def unsubscribe_reports(self, ws):
+    async def ws_unsubscribe_reports(self, ws: ClientWebSocketResponse):
+        """Unsubscribes the reports stream subscribtion.
+
+        Args:
+            ws: Websocket response object.
+        """
         message = json.dumps({'method': 'subscribeReports', 'params': {}})
         await ws.send_str(message)
         msg = await ws.receive()
@@ -306,46 +471,89 @@ class XeggeXClient():
 # Public methods
 
     async def get_assets(self):
+        """Get a list of assets."""
         path = '/asset/getlist'
         return await self.get(path)
 
-    async def get_asset_by_id(self, asset_id):
+    async def get_asset_by_id(self, asset_id: str):
+        """Get asset by id.
+
+        Args:
+            asset_id: Exchange internal asset ID.
+        """
         path = f'/asset/getbyid/{asset_id}'
         return await self.get(path)
 
-    async def get_asset_by_id(self, ticker):
+    async def get_asset_by_id(self, ticker: str):
+        """Get asset by ticker.
+
+        Args:
+            ticker: Currency symbol, for example \"XRG\".
+        """
         path = f'/asset/getbyticker/{ticker}'
         return await self.get(path)
 
     async def get_markets(self):
+        """Get list of markets"""
         path = '/market/getlist'
         return await self.get(path)
 
-    async def get_market_by_id(self, market_id):
+    async def get_market_by_id(self, market_id: str):
+        """Get market by market id.
+
+        Args:
+            market_id: Exchange internal market ID.
+        """
         path = f'/market/getbyid/{market_id}'
         return await self.get(path)
 
-    async def get_market_by_symbol(self, symbol):
+    async def get_market_by_symbol(self, symbol: str):
+        """Get market by symbol.
+
+        Args:
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         path = f'/market/getbyid/{symbol}'
         return await self.get(path)
 
     async def get_pools(self):
+        """Get list of liquidity pools"""
         path = '/pool/getlist'
         return await self.get(path)
 
-    async def get_pool_by_id(pool_id):
+    async def get_pool_by_id(pool_id: str):
+        """Get pool by pool id.
+
+        Args:
+            pool_id: Exchange internal market ID.
+        """
         path = f'/pool/getbyid/{pool_id}'
         return await self.get(path)
 
-    async def get_pool_by_id(pool_symbol):
+    async def get_pool_by_symbol(pool_symbol: str):
+        """Get pool by symbol.
+
+        Args:
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         path = f'/pool/getbysymbol/{pool_symbol}'
         return await self.get(path)
 
-    async def get_orderbook_by_symbol(symbol):
+    async def get_orderbook_by_symbol(symbol: str):
+        """Get market orderbook by symbol.
+
+        Args:
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         path = f'/market/getorderbookbysymbol/{symbol}'
         return await self.get(path)
 
-    async def get_orderbook_by_market_id(market_id):
+    async def get_orderbook_by_market_id(market_id: str):
+        """Get market orderbook by market id.
+
+        Args:
+            market_id: Exchange internal market ID.
+        """
         path = f'/market/getorderbookbymarketid/{market_id}'
         return await self.get(path)
 
@@ -353,11 +561,13 @@ class XeggeXClient():
 
     @private
     async def get_balances(self):
+        """Get detailed acccount balance information."""
         path = '/balances'
         return await self.get(path)
 
     @private
     async def get_nonzero_balances(self):
+        """Get account balance information if balance is nonzero."""
         bal = await self.get_balances()
         return [
             b for b in bal
@@ -365,21 +575,38 @@ class XeggeXClient():
         ]
 
     @private
-    async def get_deposit_address(self, ticker):
+    async def get_deposit_address(self, ticker: str):
+        """Get your deposit address.
+
+        Args:
+            ticker: Currency symbol, for example \"XRG\".
+        """
         path = f'/getdepositaddress/{ticker}'
         return await self.get(path)
 
     @private
     async def create_order(
         self,
-        symbol,
-        side,
-        quantity,
-        price=None,
-        order_type=None,
-        user_provided_id=None,
-        strict_validate=None,
+        symbol: str,
+        side: str,
+        quantity: str,
+        price: Optional[str] = None,
+        order_type: Optional[str] = None,
+        user_provided_id: Optional[str] = None,
+        strict_validate: Optional[str] = None,
     ):
+        """Creates an order.
+
+        Args:
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            side: Order side, \"sell\" or \"buy\".
+            quantity: Quantity of the base asset.
+            price: Price in terms of the quote asset required for the limit order.
+            order_type: "limit" or \"market\" ordeer type.
+            user_provided_id: Optional user-defined ID.
+            strict_validate: Strict validate amount and price precision without truncation. Setting true will return an error if your quantity/price exceeds the correct decimal places. Default false will truncate values to allowed number of decimal places.
+        """
+
         path = '/createorder'
         data =  {
             'userProvidedId': user_provided_id,
@@ -399,13 +626,24 @@ class XeggeXClient():
         return await self.post(path, data)
 
     @private
-    async def cancel_order(self, order_id):
+    async def cancel_order(self, order_id: str):
+        """Cancel an open spot trade order.
+
+        Args:
+            order_id: Order ID to cancel
+        """
         path = '/cancel_order'
         data = {'id': order_id}
         return self.post(path, data)
 
     @private
-    async def cancel_market_orders(self, symbol, side):
+    async def cancel_market_orders(self, symbol: str, side: str):
+        """Cancel a batch of open orders in a spot market.
+
+        Args:
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            side: \"sell\", \"buy\" or \"all\".
+        """
         path = '/cancelallorders'
         data = {
             'symbol': symbol,
@@ -414,7 +652,21 @@ class XeggeXClient():
         return await self.post(path, data)
 
     @private
-    async def create_withdrawal(self, ticker, quantity, address, payment_id=None):
+    async def create_withdrawal(
+        self,
+        ticker: str,
+        quantity: str,
+        address: str,
+        payment_id: Optional[str] = None
+    ):
+        """Make a new withdrawal request.
+
+        Args:
+            ticker: Currency symbol, for example \"XRG\".
+            quantity: Quantity to withdraw.
+            address: Address to withdraw to. Must be a validated address on your account.
+            paymentid: If required, provide payment id.
+        """
         path = '/createwithdrawal'
         data = {
             "ticker": ticker,
@@ -427,7 +679,14 @@ class XeggeXClient():
         return self.post(path, data)
 
     @private
-    async def get_deposits(self, limit, skip, ticker=None):
+    async def get_deposits(self, limit: int, skip: int, ticker: Optional[str] = None):
+        """Get a list of your account deposits.
+
+        Args:
+            ticker: Currency symbol, for example \"XRG\"(Optional).
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+        """
         path = '/getdeposits'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
         if ticker is None:
@@ -435,7 +694,14 @@ class XeggeXClient():
         return self.get(path, params)
 
     @private
-    async def get_withdrawals(self, limit, skip, ticker=None):
+    async def get_withdrawals(self, limit: int, skip: int, ticker: Optional[str] = None):
+        """Get a list of your account withdrawals. Ordered by created timestamp descending.
+
+        Args:
+            ticker: Currency symbol, for example \"XRG\"(Optional).
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+        """
         path = '/getwithdrawals'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
         if ticker is None:
@@ -443,12 +709,31 @@ class XeggeXClient():
         return self.get(path, params)
 
     @private
-    async def get_order(self, order_id):
+    async def get_order(self, order_id: str):
+        """Get an order by id.
+
+        Args:
+            order_id: XeggeX orderId or userProvidedId
+        """
         path = f'/getorder/{order_id}'
         return await self.get(path)
 
     @private
-    async def get_my_orders(self, status, limit, skip, symbol=None):
+    async def get_my_orders(
+        self,
+        status: str,
+        limit: int,
+        skip: int,
+        symbol: Optional[str] = None
+    ):
+        """Get a list of your orders. Ordered by created timestamp descending.
+
+        Args:
+            status: Current status of orders. 'active', 'filled', or 'cancelled'.
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         path = '/getorders'
         params = {
             'symbol': symbol,
@@ -461,7 +746,16 @@ class XeggeXClient():
         return await self.get(path, params)
 
     @private
-    async def get_trades(self, limit, skip, symbol=None):
+    async def get_trades(self, limit: int, skip: int, symbol: Optional[str] = None):
+        """Get a list of your spot market trades.
+
+        Get a list of your market trades. Ordered by created timestamp descending
+
+        Args:
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
         path = '/gettrades'
         params = {'limit':limit, 'skip':skip, 'symbol':symbol}
         if symbol is None:
@@ -469,7 +763,24 @@ class XeggeXClient():
         return await self.get(path, params)
 
     @private
-    async def get_trades_since(self, since, limit, skip, symbol=None):
+    async def get_trades_since(
+        self,
+        since: str,
+        limit: int,
+        skip: int,
+        symbol: Optional[str] = None
+    ):
+        """Get a list of your spot trades since a timestamp in millisec.
+
+       Get a list of your trades. Ordered by created timestamp ASCENDING
+
+        Args:
+            since: A timestamp in milliseconds you want to retreive records after
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
+
         path = '/gettradesince'
         params = {'since':since, 'limit':limit, 'skip':skip, 'symbol':symbol}
         if symbol is None:
@@ -477,7 +788,17 @@ class XeggeXClient():
         return await self.get(path, params)
 
     @private
-    async def get_pool_trades(self, limit, skip, symbol=None):
+    async def get_pool_trades(self, limit: int, skip: int, symbol: Optional[str] = None):
+        """Get a list of your pool trades.
+
+        Get a list of your pool trades. Ordered by created timestamp descending
+
+        Args:
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
+
         path = '/getpooltrades'
         params = {'limit':limit, 'skip':skip, 'symbol':symbol}
         if symbol is None:
@@ -485,7 +806,25 @@ class XeggeXClient():
         return await self.get(path, params)
 
     @private
-    async def get_pool_trades_since(self, since, limit, skip, symbol=None):
+    async def get_pool_trades_since(
+        self,
+        since: str,
+        limit: int,
+        skip: int,
+        symbol: Optional[str] = None
+    ):
+        """Get a list of your pool trades since a timestamp in millisec.
+
+       Get a list of your pool trades. Ordered by created timestamp ASCENDING
+
+        Args:
+            since: A timestamp in milliseconds you want to retreive records after
+            limit: Maximum limit is 500.
+            skip: Skip this many records.
+            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+        """
+
+
         path = '/getpooltradessince'
         params = {'since':since, 'limit':limit, 'skip':skip, 'symbol':symbol}
         if symbol is None:
