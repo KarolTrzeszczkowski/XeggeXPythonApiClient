@@ -772,7 +772,7 @@ class XeggeXClient():
     ):
         """Get a list of your spot trades since a timestamp in millisec.
 
-       Get a list of your trades. Ordered by created timestamp ASCENDING
+        Get a list of your trades. Ordered by created timestamp ASCENDING
 
         Args:
             since: A timestamp in milliseconds you want to retreive records after
@@ -815,7 +815,7 @@ class XeggeXClient():
     ):
         """Get a list of your pool trades since a timestamp in millisec.
 
-       Get a list of your pool trades. Ordered by created timestamp ASCENDING
+        Get a list of your pool trades. Ordered by created timestamp ASCENDING
 
         Args:
             since: A timestamp in milliseconds you want to retreive records after

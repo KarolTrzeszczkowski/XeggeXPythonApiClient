@@ -325,11 +325,17 @@
 <dd>
 <div class="desc"><p>Get a list of your pool trades since a timestamp in millisec.</p>
 <p>Get a list of your pool trades. Ordered by created timestamp ASCENDING</p>
-<p>Args:
-since: A timestamp in milliseconds you want to retreive records after
-limit: Maximum limit is 500.
-skip: Skip this many records.
-symbol: Market symbol, two tickers joined with a "/". For example "XRG/LTC".</p></div>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>since</code></strong></dt>
+<dd>A timestamp in milliseconds you want to retreive records after</dd>
+<dt><strong><code>limit</code></strong></dt>
+<dd>Maximum limit is 500.</dd>
+<dt><strong><code>skip</code></strong></dt>
+<dd>Skip this many records.</dd>
+<dt><strong><code>symbol</code></strong></dt>
+<dd>Market symbol, two tickers joined with a "/". For example "XRG/LTC".</dd>
+</dl></div>
 </dd>
 <dt id="xeggex.XeggeXClient.get_pools"><code class="name flex">
 <span>async def <span class="ident">get_pools</span></span>(<span>self)</span>
@@ -359,11 +365,17 @@ symbol: Market symbol, two tickers joined with a "/". For example "XRG/LTC".</p>
 <dd>
 <div class="desc"><p>Get a list of your spot trades since a timestamp in millisec.</p>
 <p>Get a list of your trades. Ordered by created timestamp ASCENDING</p>
-<p>Args:
-since: A timestamp in milliseconds you want to retreive records after
-limit: Maximum limit is 500.
-skip: Skip this many records.
-symbol: Market symbol, two tickers joined with a "/". For example "XRG/LTC".</p></div>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>since</code></strong></dt>
+<dd>A timestamp in milliseconds you want to retreive records after</dd>
+<dt><strong><code>limit</code></strong></dt>
+<dd>Maximum limit is 500.</dd>
+<dt><strong><code>skip</code></strong></dt>
+<dd>Skip this many records.</dd>
+<dt><strong><code>symbol</code></strong></dt>
+<dd>Market symbol, two tickers joined with a "/". For example "XRG/LTC".</dd>
+</dl></div>
 </dd>
 <dt id="xeggex.XeggeXClient.get_withdrawals"><code class="name flex">
 <span>async def <span class="ident">get_withdrawals</span></span>(<span>self, limit: int, skip: int, ticker: Optional[str] = None)</span>
