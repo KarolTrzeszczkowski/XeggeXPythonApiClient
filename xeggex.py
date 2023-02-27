@@ -10,16 +10,20 @@ import random
 from time import time
 import asyncio
 import aiohttp
+from aiohttp import ClientWebSocketResponse
 from functools import wraps
 from decimal import Decimal
+from typing import Optional, List
 
 class Auth():
-    def __init__(self, access_key, secret_key):
+    """Authentication class that produces headers for api and login message for websocket."""
+    def __init__(self, access_key: str, secret_key: str):
         super().__init__()
         self.secret_key = secret_key
         self.access_key = access_key
 
-    def sign(self, payload):
+    def sign(self, payload: str) -> str:
+        """Produces signature for an arbitrary string."""
         signature = hmac.new(
             self.secret_key.encode(),
             payload.encode(),
@@ -27,7 +31,8 @@ class Auth():
         ).hexdigest()
         return signature
 
-    def headers(self, payload):
+    def headers(self, payload: str) -> dict:
+        """Creates auth headers for rest API."""
         nonce = str(int(time()*1000))
         signature = self.sign(self.access_key+payload+nonce)
         headers =  {
@@ -73,17 +78,17 @@ class XeggeXClient():
         params_str = '?'+urlencode(params) if params else ''
         async with self.session.get(
             self.endpoint+path+params_str,
-            headers = self.auth.headers(self.endpoint+path+params_str)
+            headers = self.auth.headers(self.endpoint+path+params_str) if self.auth else {}
         ) as resp:
             response = await resp.json()
         return response
 
     async def post(self, path, data):
-        data = json.dumps(data,separators=(',',':'))
+        data_str = json.dumps(data,separators=(',',':'))
         async with self.session.post(
             self.endpoint+path,
-            data=data,
-            headers = self.auth.headers(self.endpoint+path+data)
+            data=data_str,
+            headers = self.auth.headers(self.endpoint+path+data_str)
         ) as resp:
             response = await resp.json()
             return response
@@ -190,11 +195,6 @@ class XeggeXClient():
         msg = await ws.receive()
         return msg.json()
 
-    async def ws_get_assets_list(self, ws):
-        message = json.dumps({'method':'getAssets', 'params':{}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
 
     async def ws_get_market_list(self, ws):
         message = json.dumps({'method':'getMarkets', 'params':{}})
@@ -444,7 +444,7 @@ class XeggeXClient():
 
     @private
     async def get_order(self, order_id):
-        path = f'/getdepositaddress/{order_id}'
+        path = f'/getorder/{order_id}'
         return await self.get(path)
 
     @private
