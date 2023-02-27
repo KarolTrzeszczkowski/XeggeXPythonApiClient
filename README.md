@@ -1,5 +1,5 @@
 # README  stub
-This is the python API client for XeggeX exchange API.
+This is the python API client for XeggeX exchange API. [Reference link](https://htmlpreview.github.io/?https://github.com/KarolTrzeszczkowski/XeggeXPythonApiClient/blob/master/html/xeggex.html)
 
 <a name="settings"></a>
 ## Api Keys 
