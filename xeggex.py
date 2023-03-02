@@ -71,9 +71,9 @@ def private(func):
 
 class XeggeXClient():
     """The class that for accessing XeggeX exchange API."""
-    def __init__(self):
+    def __init__(self, settings_file = 'xeggex_settings.json'):
         try:
-            with open('xeggex_settings.json') as f:
+            with open(settings_file) as f:
                 settings = json.load(f)
             self.auth = Auth(settings['access_key'], settings['secret_key'])
         except (FileNotFoundError, KeyError) as ex:
@@ -143,7 +143,7 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        await ws.send_str(self.auth.ws_auth_message)
+        await ws.send_str(self.auth.ws_auth_message())
         msg = await ws.receive()
         return msg.json()
 
@@ -446,7 +446,6 @@ class XeggeXClient():
 
 # Private streams
 
-    @private
     def ws_subscribe_reports_generator(self, ws: ClientWebSocketResponse):
         """Creates a reports stream subscribtion in a form of a generator.
 
@@ -454,6 +453,8 @@ class XeggeXClient():
             ws: Websocket response object.
         """
         message = json.dumps({'method': 'subscribeReports', 'params': {}})
+        # async generators are weird to handle with decorators, manually checking for auth.
+        assert self.auth,"Auth not found. You can't use Account endpoints without specifying API keys. Specify \"access_key\" and \"secret_key\" in \"xeggex_settings.json\" file."
         return self.ws_stream_generator(ws, message, ['activeOrders', 'report'])
 
     @private
