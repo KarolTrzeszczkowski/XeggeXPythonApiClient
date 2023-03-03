@@ -69,7 +69,14 @@ def private(func):
         return await func(*args, **kwargs)
     return wrap
 
-class XeggeXClient():
+def pop_none(params):
+    """A helper function that removes parameters with a None value"""
+    par = params.copy().items()
+    for key, value in par:
+        if not value:
+            params.pop(key)
+
+ XeggeXClient():
     """The class that for accessing XeggeX exchange API."""
     def __init__(self, settings_file = 'xeggex_settings.json'):
         try:
@@ -183,10 +190,7 @@ class XeggeXClient():
                 'strictValidate': strict_validate
             }
         }
-        params = message['params'].items()
-        for key, value in params:
-            if message['params'][key] is None:
-                message['params'].pop(key)
+        pop_none(message['params'])
         await ws.send_str(json.dumps(message))
         msg = await ws.receive()
         return msg.json()
@@ -209,10 +213,7 @@ class XeggeXClient():
                    'params': {'orderId': order_id, 'userProvidedId': user_provided_id}}
         error_msg = "You have to unambiguously specify order ID to cancel it"
         assert order_id is not None ^ user_provided_id is not None, error_msg 
-        if message['params']['orderId'] is None:
-            message['params'].pop('orderId')
-        if message['params']['userProvidedId'] is None:
-            message['params'].pop('userProvidedId')
+        pop_none(message['params'])
         await ws.send_str(json.dumps(message))
         msg = await ws.receive()
         return msg.json()
@@ -226,8 +227,7 @@ class XeggeXClient():
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
         """
         message = {'method': 'getOrders', 'params': {'symbol': symbol}}
-        if message['params']['symbol'] is None:
-            message['params'].pop('symbol')
+        pop_none(message['params')]
         await ws.send_str(json.dumps(message))
         msg = await ws.receive()
         return msg.json()
@@ -325,10 +325,7 @@ class XeggeXClient():
                 'till': history_till
             }
         }
-        items = message['params'].items()
-        for key, value in items:
-            if value is None:
-                message['params'].pop(key)
+        pop_none(message['params'])
         await ws.send_str(json.dumps(message))
         msg = await ws.receive()
         return msg.json()
@@ -371,8 +368,7 @@ class XeggeXClient():
             limit: (Optional) The number of items on each side of the books. Default: 100 
         """
         message = {'method': 'subscribeOrderbook', 'params': {'symbol': symbol,'limit': limit}}
-        if message['params']['limit'] is None:
-            message['params'].pop('limit')
+        pop_none(message['params'])
         return self.ws_stream_generator(
             ws, json.dumps(message), ['snapshotOrderbook', 'updateOrderbook'])
 
@@ -425,8 +421,7 @@ class XeggeXClient():
         """
         message = {'method': 'subscribeCandles',
                    'params': {'symbol':symbol, 'period': period, 'limit': limit}}
-        if message['params']['limit'] is None:
-            message['params'].pop('limit')
+        pop_none(message['params'])
         return self.ws_stream_generator(
             ws, json.dumps(message), ['snapshotCandles', 'updateCandles'])
 
@@ -609,22 +604,19 @@ class XeggeXClient():
         """
 
         path = '/createorder'
-        data =  {
+        params =  {
             'userProvidedId': user_provided_id,
             'symbol': symbol,
             'side': side,
             'type': order_type,
-            'quantity': volume,
+            'quantity': quantity,
             'price': price,
             'strictValidate': strict_validate,
         }
-        items = data.items()
         if order_type in [None, 'limit']:
             assert price is not None, "Specify price for a limit order"
-        for key, value in items:
-            if value is None:
-                data.pop(key)
-        return await self.post(path, data)
+        pop_none(params)
+        return await self.post(path, params)
 
     @private
     async def cancel_order(self, order_id: str):
@@ -634,8 +626,8 @@ class XeggeXClient():
             order_id: Order ID to cancel
         """
         path = '/cancel_order'
-        data = {'id': order_id}
-        return self.post(path, data)
+        params = {'id': order_id}
+        return self.post(path, params)
 
     @private
     async def cancel_market_orders(self, symbol: str, side: str):
@@ -675,8 +667,7 @@ class XeggeXClient():
             "address": address,
             "paymentId": payment_id
         }
-        if not payment_id:
-            data.pop('paymentId')
+        pop_none(data)
         return self.post(path, data)
 
     @private
@@ -690,8 +681,7 @@ class XeggeXClient():
         """
         path = '/getdeposits'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
-        if ticker is None:
-            params.pop('ticker')
+        pop_none(params)
         return self.get(path, params)
 
     @private
@@ -705,8 +695,7 @@ class XeggeXClient():
         """
         path = '/getwithdrawals'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
-        if ticker is None:
-            params.pop('ticker')
+        pop_none(params)
         return self.get(path, params)
 
     @private
@@ -742,8 +731,7 @@ class XeggeXClient():
             'limit': limit,
             'skip': skip
         }
-        if symbol is None:
-            params.pop('symbol')
+        pop_none(params)
         return await self.get(path, params)
 
     @private
@@ -759,8 +747,7 @@ class XeggeXClient():
         """
         path = '/gettrades'
         params = {'limit':limit, 'skip':skip, 'symbol':symbol}
-        if symbol is None:
-            params.pop('symbol')
+        pop_none(params)
         return await self.get(path, params)
 
     @private
@@ -784,8 +771,7 @@ class XeggeXClient():
 
         path = '/gettradesince'
         params = {'since':since, 'limit':limit, 'skip':skip, 'symbol':symbol}
-        if symbol is None:
-            params.pop('symbol')
+        pop_none(params)
         return await self.get(path, params)
 
     @private
@@ -802,8 +788,7 @@ class XeggeXClient():
 
         path = '/getpooltrades'
         params = {'limit':limit, 'skip':skip, 'symbol':symbol}
-        if symbol is None:
-            params.pop('symbol')
+        pop_none(params)
         return await self.get(path, params)
 
     @private
@@ -828,7 +813,6 @@ class XeggeXClient():
 
         path = '/getpooltradessince'
         params = {'since':since, 'limit':limit, 'skip':skip, 'symbol':symbol}
-        if symbol is None:
-            params.pop('symbol')
+        pop_none(params)
         return await self.get(path, params)
 
