@@ -15,6 +15,7 @@ import aiohttp
 from aiohttp import ClientWebSocketResponse
 from functools import wraps
 from decimal import Decimal
+from datetime import datetime
 from typing import Optional, List
 
 class Auth():
@@ -76,7 +77,7 @@ def pop_none(params):
         if not value:
             params.pop(key)
 
- XeggeXClient():
+class XeggeXClient():
     """The class that for accessing XeggeX exchange API."""
     def __init__(self, settings_file = 'xeggex_settings.json'):
         try:
@@ -227,7 +228,7 @@ def pop_none(params):
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
         """
         message = {'method': 'getOrders', 'params': {'symbol': symbol}}
-        pop_none(message['params')]
+        pop_none(message['params'])
         await ws.send_str(json.dumps(message))
         msg = await ws.receive()
         return msg.json()
@@ -314,6 +315,9 @@ def pop_none(params):
                 When using from or till, then both are required.
 
         """
+        if isinstance(history_from, datetime):
+            history_from = history_from.strftime("%Y-%m-%dT%H:%M:%SZ")
+            history_till = history_till.strftime("%Y-%m-%dT%H:%M:%SZ")
         message = {
             'method': 'getTrades',
             'params': {
