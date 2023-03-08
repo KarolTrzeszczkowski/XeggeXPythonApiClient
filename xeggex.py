@@ -18,6 +18,33 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional, List
 
+subscriptions = {
+    "ticker": {
+        "message": lambda symbol: {'method': 'subscribeTicker', 'params': {'symbol': symbol}},
+        "methods": ['ticker']
+    },
+    'orderbook': {
+        'message': lambda symbol, limit: {
+            'method': 'subscribeOrderbook', 'params': {'symbol': symbol,'limit': limit}},
+        'methods': ['snapshotOrderbook', 'updateOrderbook']
+    },
+    'trades': {
+        'message': lambda symbol: {'method': 'subscribeTrades', 'params': {'symbol': symbol}},
+        'methods': ['snapshotTrades', 'updateTrades']
+    },
+    'candles': {
+        'message': lambda symbol, period, limit:  {
+            'method': 'subscribeCandles',
+            'params': {'symbol':symbol, 'period': period, 'limit': limit}},
+        'methods': ['snapshotCandles', 'updateCandles']
+    },
+    'reports': {
+        'message': lambda :{'method': 'subscribeReports', 'params': {}},
+        'methods':  ['activeOrders', 'report']
+    }
+
+}
+
 class Auth():
     """Authentication class that produces headers for api and login message for websocket."""
     def __init__(self, access_key: str, secret_key: str):
@@ -97,8 +124,12 @@ class XeggeXClient():
             self.endpoint+path+params_str,
             headers = self.auth.headers(self.endpoint+path+params_str) if self.auth else {}
         ) as resp:
-            response = await resp.json()
-        return response
+            if resp.content_type=='application/json':
+                response = await resp.json()
+            else:
+                print(await resp.text())
+                raise ValueError(f"Endpoint should be returning json, got {resp.content_type} instead.")
+            return response
 
     async def post(self, path: str, data: dict):
         """The basic POST query, inserts authorization header"""
@@ -108,7 +139,11 @@ class XeggeXClient():
             data=data_str,
             headers = self.auth.headers(self.endpoint+path+data_str)
         ) as resp:
-            response = await resp.json()
+            if resp.content_type=='application/json':
+                response = await resp.json()
+            else:
+                print(await resp.text())
+                raise ValueError(f"Endpoint should be returning json, got {resp.content_type} instead.")
             return response
 
     def websocket_context(self):
