@@ -14,9 +14,12 @@ import asyncio
 import aiohttp
 from aiohttp import ClientWebSocketResponse
 from functools import wraps
+from itertools import count
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, List
+from collections import defaultdict
+from asyncio import Queue
 
 subscriptions = {
     "ticker": {
@@ -76,7 +79,7 @@ class Auth():
     def ws_auth_message(self) -> str:
         """Creates a login string for websocket."""
         nonce = ''.join(random.choice(string.ascii_letters+string.digits) for i in range(20))
-        return json.dumps({
+        return {
             'method':'login',
             'params':{
                 'algo': "HS256",
@@ -84,7 +87,7 @@ class Auth():
                 'nonce': nonce,
                 'signature': self.sign(nonce)
             }
-        })
+        }
 
 def private(func):
     """Decorator for declaring functions that require API keys.
@@ -104,6 +107,23 @@ def pop_none(params):
         if not value:
             params.pop(key)
 
+
+class WSListenerContext():
+    def __init__(self, ws, listener_function):
+        self.ws = ws
+        self.listener = listener_function
+        self.task = None
+
+    async def __aenter__(self):
+        ws = await self.ws.__aenter__()
+        self.task = asyncio.create_task(self.listener(self.ws))
+        return ws
+
+    async def __aexit__(self, *exc):
+        self.task.cancel()
+        await self.ws.__aexit__(*exc)
+        return False
+
 class XeggeXClient():
     """The class that for accessing XeggeX exchange API."""
     def __init__(self, settings_file = 'xeggex_settings.json'):
@@ -115,7 +135,9 @@ class XeggeXClient():
             self.auth = None
         self.endpoint = "https://xeggex.com/api/v2"
         self.ws_endpoint = 'wss://ws.xeggex.com'
+        self.ws_responses = defaultdict(Queue)
         self.session = aiohttp.ClientSession()
+        self.id = count()
 
     async def get(self, path: str, params: dict = {}):
         """The basic GET query, inserts authorization header."""
@@ -146,12 +168,38 @@ class XeggeXClient():
                 raise ValueError(f"Endpoint should be returning json, got {resp.content_type} instead.")
             return response
 
+    async def ws_get(self, ws, message: dict):
+        message['id'] = next(self.id)
+        await ws.send_str(json.dumps(message))
+        q = self.ws_responses[message['id']]
+        msg = await q.get()
+        self.ws_responses.pop[message['id']]
+        return msg.json()
+
+    async def ws_listener(self, ws):
+        while True:
+            msg = await ws.receive()
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                message = msg.json()
+                if 'id' in message.keys():
+                    await self.ws_responses[message['id']].put(message)
+                if 'method' in notification.keys():
+                    for stream, values in subsctiptions.items():
+                        if message['method'] in values['methods']:
+                            await self.ws_responses[stream].put(message)
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                print(f"websocket connection closed with error {ws.exception()}")
+                return
+            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                print(f"websocket connection closed.")
+                return
+
     def websocket_context(self):
         """Gets an entry point to a websocket, to be used with `async with ... as ws:`."""
-        return self.session.ws_connect(self.ws_endpoint)
+        ws = self.session.ws_connect(self.ws_endpoint)
+        return WSListenerContext(ws, self.ws_listener)
 
-    async def ws_stream_generator(self, ws: ClientWebSocketResponse,
-                                  message: str, response_methods: List[str]):
+    async def ws_stream_generator(self, ws: ClientWebSocketResponse, stream, **params):
         """Creates a stream subscribtion in a form of a generator.
 
         The generator is meant to be iterated over with `async for` or `anext` builtin.
@@ -162,20 +210,11 @@ class XeggeXClient():
             response_methods: The list of \"method\" keys returned from as the stream response.
                 Allows you to drop some parts of the communication, like the initial snapshot.
         """
+        message = subscriptions[stream]['message'](**params)
         await ws.send_str(message)
         while True:
-            msg = await ws.receive()
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                notification = msg.json()
-                if 'method' in notification.keys():
-                    if notification['method'] in response_methods:
-                        yield notification
-            elif msg.type == aiohttp.WSMsgType.ERROR:
-                print(f"websocket connection closed with error {ws.exception()}")
-                return
-            elif msg.type == aiohttp.WSMsgType.CLOSED:
-                print(f"websocket connection closed.")
-                return
+            msg = await self.ws_responses[stream].get()
+            yield msg
 
 # Websocket methods
 
@@ -186,9 +225,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        await ws.send_str(self.auth.ws_auth_message())
-        msg = await ws.receive()
-        return msg.json()
+        login = self.auth.ws_auth_message()
+        return await self.ws_get(ws, login)
 
     @private
     async def ws_create_order(
@@ -227,9 +265,7 @@ class XeggeXClient():
             }
         }
         pop_none(message['params'])
-        await ws.send_str(json.dumps(message))
-        msg = await ws.receive()
-        return msg.json()
+        return await self.ws_get(json.dumps(message))
 
     @private
     async def ws_cancel_order(
