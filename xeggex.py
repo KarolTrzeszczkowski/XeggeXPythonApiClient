@@ -1,7 +1,6 @@
 """The module for accessing XeggeX API written in asynchronous python"""
 
 import json
-import time
 import hashlib, hmac
 try:
     from urllib import urlencode
@@ -17,7 +16,7 @@ from functools import wraps
 from itertools import count
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 from collections import defaultdict
 from asyncio import Queue
 
@@ -28,7 +27,7 @@ subscriptions = {
     },
     'orderbook': {
         'message': lambda symbol, limit: {
-            'method': 'subscribeOrderbook', 'params': {'symbol': symbol,'limit': limit}},
+            'method': 'subscribeOrderbook', 'params': pop_none({'symbol': symbol,'limit': limit})},
         'methods': ['snapshotOrderbook', 'updateOrderbook']
     },
     'trades': {
@@ -38,14 +37,13 @@ subscriptions = {
     'candles': {
         'message': lambda symbol, period, limit:  {
             'method': 'subscribeCandles',
-            'params': {'symbol':symbol, 'period': period, 'limit': limit}},
+            'params': pop_none({'symbol':symbol, 'period': period, 'limit': limit})},
         'methods': ['snapshotCandles', 'updateCandles']
     },
     'reports': {
         'message': lambda :{'method': 'subscribeReports', 'params': {}},
         'methods':  ['activeOrders', 'report']
     }
-
 }
 
 class Auth():
@@ -106,9 +104,13 @@ def pop_none(params):
     for key, value in par:
         if not value:
             params.pop(key)
+    return params
 
+class WSException(Exception):
+    pass
 
 class WSListenerContext():
+    """Websocket listener context class, wraps the asyncio websocket context by adding a listener and removes it afterwards."""
     def __init__(self, ws, listener_function):
         self.ws = ws
         self.listener = listener_function
@@ -116,7 +118,7 @@ class WSListenerContext():
 
     async def __aenter__(self):
         ws = await self.ws.__aenter__()
-        self.task = asyncio.create_task(self.listener(self.ws))
+        self.task = asyncio.create_task(self.listener(ws))
         return ws
 
     async def __aexit__(self, *exc):
@@ -137,7 +139,12 @@ class XeggeXClient():
         self.ws_endpoint = 'wss://ws.xeggex.com'
         self.ws_responses = defaultdict(Queue)
         self.session = aiohttp.ClientSession()
-        self.id = count()
+        self.sending_event = asyncio.Event()
+        self.ws_lock = asyncio.Lock()
+        self.id = count(start=1)
+
+    async def close(self):
+        await self.session.close()
 
     async def get(self, path: str, params: dict = {}):
         """The basic GET query, inserts authorization header."""
@@ -168,25 +175,53 @@ class XeggeXClient():
                 raise ValueError(f"Endpoint should be returning json, got {resp.content_type} instead.")
             return response
 
-    async def ws_get(self, ws, message: dict):
+    async def ws_get(self, ws: ClientWebSocketResponse, message: dict):
+        """Sends and receives the websocket response or throws a WSException if an error happened."""
         message['id'] = next(self.id)
-        await ws.send_str(json.dumps(message))
-        q = self.ws_responses[message['id']]
-        msg = await q.get()
-        self.ws_responses.pop[message['id']]
-        return msg.json()
+        self.sending_event.set()
+        async with self.ws_lock:
+            await ws.send_str(json.dumps(message))
+        q, e = self.ws_responses[message['id']], self.ws_responses['error']
+        done, pending = await asyncio.wait(
+            [asyncio.create_task(q.get()), asyncio.create_task(e.get())],
+            return_when=asyncio.FIRST_COMPLETED)
+        d = done.pop()
+        if 'error' in d.result().keys():
+            raise WSException(d.result()['error'])
+        else:
+            self.ws_responses.pop(message['id'])
+            return d.result()
 
-    async def ws_listener(self, ws):
+    async def ws_listener(self, ws: ClientWebSocketResponse):
+        """A coroutine that listens on the websocket and dispatches the received messages to the queue.
+        """
         while True:
-            msg = await ws.receive()
+            msg = None
+            while not msg:
+                async with self.ws_lock:
+                    msg_task = asyncio.create_task(ws.receive())
+                    done, pending = await asyncio.wait(
+                        [msg_task, asyncio.create_task(self.sending_event.wait())],
+                        return_when = asyncio.FIRST_COMPLETED
+                    )
+                    if msg_task in pending:
+                        self.sending_event.clear()
+                        msg_task.cancel()
+                    else:
+                        msg = msg_task.result()
+                await asyncio.sleep(0)
             if msg.type == aiohttp.WSMsgType.TEXT:
                 message = msg.json()
                 if 'id' in message.keys():
                     await self.ws_responses[message['id']].put(message)
-                if 'method' in notification.keys():
-                    for stream, values in subsctiptions.items():
+                if 'method' in message.keys():
+                    for stream, values in subscriptions.items():
                         if message['method'] in values['methods']:
                             await self.ws_responses[stream].put(message)
+                            break
+                if 'error' in message.keys():
+                    await self.ws_responses['error'].put(message)
+                    print(message)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 print(f"websocket connection closed with error {ws.exception()}")
                 return
@@ -211,10 +246,32 @@ class XeggeXClient():
                 Allows you to drop some parts of the communication, like the initial snapshot.
         """
         message = subscriptions[stream]['message'](**params)
-        await ws.send_str(message)
+        await ws.send_str(json.dumps(message))
         while True:
-            msg = await self.ws_responses[stream].get()
-            yield msg
+            q, e = self.ws_responses[stream], self.ws_responses['error']
+            done, pending = await asyncio.wait([asyncio.create_task(q.get()), asyncio.create_task(e.get())],
+                                         return_when=asyncio.FIRST_COMPLETED)
+            d = done.pop()
+            if 'error' in d.result().keys():
+                raise WSException(d.result()['error'])
+            else:
+                yield d.result()
+
+    async def combine_streams(self, stream_list: List):
+        '''Lets you iterate over multiple streams at once as the messages come.
+
+        Create a list of trade streams, `xrg_trades_stream = [self.subscribe_trades_generator(ws, 'XRG/USDT'), self.subscribe_trades_generator(ws, 'XRG/LTC')]` and listen to trades from both market at once `async for msg in combine_streams(xrg_trades_stream): ...`
+
+        '''
+        tasks = [asyncio.create_task(stream.__anext__()) for stream in stream_list]
+        while True:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            d = done.pop()
+            yield d.result()
+            ind = tasks.index(d)
+            tasks.remove(d)
+            tasks.insert(ind, asyncio.create_task( stream_list[ind].__anext__()))
+
 
 # Websocket methods
 
@@ -265,7 +322,7 @@ class XeggeXClient():
             }
         }
         pop_none(message['params'])
-        return await self.ws_get(json.dumps(message))
+        return await self.ws_get(ws, message)
 
     @private
     async def ws_cancel_order(
@@ -284,11 +341,9 @@ class XeggeXClient():
         message = {'method': 'cancelOrder',
                    'params': {'orderId': order_id, 'userProvidedId': user_provided_id}}
         error_msg = "You have to unambiguously specify order ID to cancel it"
-        assert order_id is not None ^ user_provided_id is not None, error_msg 
+        assert (order_id is not None) ^ (user_provided_id is not None), error_msg 
         pop_none(message['params'])
-        await ws.send_str(json.dumps(message))
-        msg = await ws.receive()
-        return msg.json()
+        return await self.ws_get(ws, message)
 
     @private
     async def ws_get_active_orders(self, ws: ClientWebSocketResponse, symbol: str = None):
@@ -300,9 +355,7 @@ class XeggeXClient():
         """
         message = {'method': 'getOrders', 'params': {'symbol': symbol}}
         pop_none(message['params'])
-        await ws.send_str(json.dumps(message))
-        msg = await ws.receive()
-        return msg.json()
+        return await self.ws_get(ws, message)
 
     @private
     async def ws_get_trading_balance(self, ws: ClientWebSocketResponse):
@@ -311,10 +364,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method':'getTradingBalance', 'params':{}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method':'getTradingBalance', 'params':{}}
+        return await self.ws_get(ws, message)
 
     async def ws_get_assets_list(self, ws: ClientWebSocketResponse):
         """Get assets list through a websocket.
@@ -322,10 +373,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method':'getAssets', 'params':{}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method':'getAssets', 'params':{}}
+        return await self.ws_get(ws, message)
 
     async def ws_get_asset(self, ws: ClientWebSocketResponse, ticker: str):
         """Get asset trhough a websocket.
@@ -334,10 +383,8 @@ class XeggeXClient():
             ws: Websocket response object.
             ticker: Currency symbol, for example \"XRG\".
         """
-        message = json.dumps({'method':'getAssets', 'params':{'ticker': ticker}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method':'getAssets', 'params':{'ticker': ticker}}
+        return await self.ws_get(ws, message)
 
     async def ws_get_markets_list(self, ws: ClientWebSocketResponse):
         """Get markets list through a websocket.
@@ -345,10 +392,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method':'getMarkets', 'params':{}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method':'getMarkets', 'params':{}}
+        return await self.ws_get(ws, message)
 
     async def ws_get_market(self, ws: ClientWebSocketResponse, symbol: str):
         """Get market info through a websocket.
@@ -357,10 +402,8 @@ class XeggeXClient():
             ws: Websocket response object.
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
         """
-        message = json.dumps({'method':'getMarket', 'params': {'symbol': symbol}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method':'getMarket', 'params': {'symbol': symbol}}
+        return await self.ws_get(ws, message)
 
     async def ws_get_trade_history(
         self,
@@ -369,8 +412,8 @@ class XeggeXClient():
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         sort: Optional[str] = None,
-        history_from: Optional[str] = None,
-        history_till: Optional[str] = None
+        history_from: Optional[Union[str, datetime]] = None,
+        history_till: Optional[Union[str, datetime]] = None
     ):
         """Get trade history through a websocket.
 
@@ -380,9 +423,9 @@ class XeggeXClient():
             limit: Number of entries, (Optional, default: 100, max: 1000).
             offset: Offset the results by this number (Optional, default: 0).
             sort: 'ASC' for ascending order, 'DESC' for decending order. (Optional, default: DESC)
-            history_from: This is earliest datetime. (Optional).
-                When using from or till, then both are required.
-            history_till: This is latest datetime. (Optional).
+            history_from: This is earliest datetime. Can be a datetime object or string formatted
+                as `YYYY-MM-DDTH:MM:SSZ` (Optional). When using from or till, then both are required.
+            history_till: This is latest datetime. Formatted the same as `history_from` (Optional).
                 When using from or till, then both are required.
 
         """
@@ -401,9 +444,7 @@ class XeggeXClient():
             }
         }
         pop_none(message['params'])
-        await ws.send_str(json.dumps(message))
-        msg = await ws.receive()
-        return msg.json()
+        return await self.ws_get(ws, message)
 
 # Public streams
 
@@ -415,8 +456,7 @@ class XeggeXClient():
             ws: Websocket response object.
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
         """
-        message = json.dumps({'method': 'subscribeTicker', 'params': {'symbol': symbol}})
-        return self.ws_stream_generator(ws, message, ['ticker'])
+        return self.ws_stream_generator(ws, "ticker", symbol=symbol)
 
     async def unsubscribe_ticker(self, ws: ClientWebSocketResponse, symbol: str):
         """Unsubscribes the ticker stream subscribtion.
@@ -424,10 +464,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method': 'unsubscribeTicker', 'params': {'symbol': symbol}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method': 'unsubscribeTicker', 'params': {'symbol': symbol}}
+        return await self.ws_get(ws, message)
 
     def subscribe_orderbook_generator(
             self,
@@ -442,10 +480,7 @@ class XeggeXClient():
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
             limit: (Optional) The number of items on each side of the books. Default: 100 
         """
-        message = {'method': 'subscribeOrderbook', 'params': {'symbol': symbol,'limit': limit}}
-        pop_none(message['params'])
-        return self.ws_stream_generator(
-            ws, json.dumps(message), ['snapshotOrderbook', 'updateOrderbook'])
+        return self.ws_stream_generator(ws, "orderbook", symbol=symbol, limit=limit)
 
     async def unsubscribe_orderbook(self, ws: ClientWebSocketResponse, symbol: str):
         """Unsubscribes the orderbook stream subscribtion.
@@ -453,10 +488,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method': 'unsubscribeOrderbook', 'params': {'symbol': symbol}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method': 'unsubscribeOrderbook', 'params': {'symbol': symbol}}
+        return await self.ws_get(ws, message)
 
     def subscribe_trades_generator(self, ws: ClientWebSocketResponse, symbol: str):
         """Creates a trades stream subscribtion in a form of a generator.
@@ -465,8 +498,7 @@ class XeggeXClient():
             ws: Websocket response object.
             symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
         """
-        message = json.dumps({'method': 'subscribeTrades', 'params': {'symbol': symbol}})
-        return self.ws_stream_generator(ws, message, ['snapshotTrades', 'updateTrades'])
+        return self.ws_stream_generator(ws, "trades", symbol=symbol)
         
     async def unsubscribe_trades(self, ws: ClientWebSocketResponse, symbol: str):
         """Unsubscribes the trades stream subscribtion.
@@ -474,10 +506,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method': 'unsubscribeTrades', 'params': {'symbol': symbol}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method': 'unsubscribeTrades', 'params': {'symbol': symbol}}
+        return await self.ws_get(ws, message)
 
     def subscribe_candles_generator(
             self,
@@ -494,11 +524,8 @@ class XeggeXClient():
             period: The candlestick period you would like (Minutes). (5, 15, 30, 60, 180, 240, 480, 720, 1440)
             limit: Limit the results. (Optional, default: 100)
         """
-        message = {'method': 'subscribeCandles',
-                   'params': {'symbol':symbol, 'period': period, 'limit': limit}}
-        pop_none(message['params'])
         return self.ws_stream_generator(
-            ws, json.dumps(message), ['snapshotCandles', 'updateCandles'])
+            ws, "candles", symbol=symbol, period=period, limit=limit)
 
     async def unsubscribe_candles(self, ws: ClientWebSocketResponse, symbol: str, period: int):
         """Unsubscribes the reports stream subscribtion.
@@ -507,11 +534,10 @@ class XeggeXClient():
             ws: Websocket response object.
             period: The candlestick period you would like (Minutes). (5, 15, 30, 60, 180, 240, 480, 720, 1440)
         """
-        message = json.dumps({'method': 'unsubscribeCandles',
-                              'params': {'symbol': symbol, 'period':period}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message ={'method': 'unsubscribeCandles',
+                              'params': {'symbol': symbol, 'period':period}}
+
+        return await self.ws_get(ws, message)
 
 
 # Private streams
@@ -522,10 +548,9 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method': 'subscribeReports', 'params': {}})
-        # async generators are weird to handle with decorators, manually checking for auth.
-        assert self.auth,"Auth not found. You can't use Account endpoints without specifying API keys. Specify \"access_key\" and \"secret_key\" in \"xeggex_settings.json\" file."
-        return self.ws_stream_generator(ws, message, ['activeOrders', 'report'])
+        #async generators are weird to handle with decorators, manually checking for auth.
+        assert self.auth, "Auth not found. You can't use Account endpoints without specifying API keys. Specify \"access_key\" and \"secret_key\" in \"xeggex_settings.json\" file."
+        return self.ws_stream_generator(ws, "reports")
 
     @private
     async def ws_unsubscribe_reports(self, ws: ClientWebSocketResponse):
@@ -534,10 +559,8 @@ class XeggeXClient():
         Args:
             ws: Websocket response object.
         """
-        message = json.dumps({'method': 'subscribeReports', 'params': {}})
-        await ws.send_str(message)
-        msg = await ws.receive()
-        return msg.json()
+        message = {'method': 'subscribeReports', 'params': {}}
+        return await self.ws_get(ws, message)
 
 # Public methods
 

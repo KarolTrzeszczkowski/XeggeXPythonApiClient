@@ -68,5 +68,19 @@ xeggex_settings.json format:
 ...     data = await x.ws_get_active_orders(ws)
 
 ```
+### Reading multiple streams at once
+```
+>>> from lib.clients.xeggex import XeggeXClient
+>>> x = XeggeXClient()
+>>> async with x.websocket_context() as ws:
+...     xrg_trades = [
+...         x.subscribe_trades_generator(ws, 'DOGE/USDT'),
+...         x.subscribe_trades_generator(ws, 'LTC/USDT')
+...     ]
+...     async for msg in x.combine_streams(xrg_trades):
+...         print(msg['params']['data'])
+... 
+```
+## Examples
 
 
