@@ -31,6 +31,12 @@
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
+<dt id="xeggex.pop_none"><code class="name flex">
+<span>def <span class="ident">pop_none</span></span>(<span>params)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A helper function that removes parameters with a None value</p></div>
+</dd>
 <dt id="xeggex.private"><code class="name flex">
 <span>def <span class="ident">private</span></span>(<span>func)</span>
 </code></dt>
@@ -71,8 +77,28 @@
 </dd>
 </dl>
 </dd>
+<dt id="xeggex.WSException"><code class="flex name class">
+<span>class <span class="ident">WSException</span></span>
+<span>(</span><span>*args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Common base class for all non-exit exceptions.</p></div>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li>builtins.Exception</li>
+<li>builtins.BaseException</li>
+</ul>
+</dd>
+<dt id="xeggex.WSListenerContext"><code class="flex name class">
+<span>class <span class="ident">WSListenerContext</span></span>
+<span>(</span><span>ws, listener_function)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Websocket listener context class, wraps the asyncio websocket context by adding a listener and removes it afterwards.</p></div>
+</dd>
 <dt id="xeggex.XeggeXClient"><code class="flex name class">
 <span>class <span class="ident">XeggeXClient</span></span>
+<span>(</span><span>settings_file='xeggex_settings.json')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>The class that for accessing XeggeX exchange API.</p></div>
@@ -101,6 +127,19 @@
 <dt><strong><code>order_id</code></strong></dt>
 <dd>Order ID to cancel</dd>
 </dl></div>
+</dd>
+<dt id="xeggex.XeggeXClient.close"><code class="name flex">
+<span>async def <span class="ident">close</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="xeggex.XeggeXClient.combine_streams"><code class="name flex">
+<span>async def <span class="ident">combine_streams</span></span>(<span>self, stream_list: List[~T])</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Lets you iterate over multiple streams at once as the messages come.</p>
+<p>Create a list of trade streams, <code>xrg_trades_stream = [self.subscribe_trades_generator(ws, 'XRG/USDT'), self.subscribe_trades_generator(ws, 'XRG/LTC')]</code> and listen to trades from both market at once <code>async for msg in combine_streams(xrg_trades_stream): ...</code></p></div>
 </dd>
 <dt id="xeggex.XeggeXClient.create_order"><code class="name flex">
 <span>async def <span class="ident">create_order</span></span>(<span>self, symbol: str, side: str, quantity: str, price: Optional[str] = None, order_type: Optional[str] = None, user_provided_id: Optional[str] = None, strict_validate: Optional[str] = None)</span>
@@ -548,6 +587,12 @@
 <dd>Strict validate amount and price precision without truncation. Setting true will return an error if your quantity/price exceeds the correct decimal places. Default false will truncate values to allowed number of decimal places.</dd>
 </dl></div>
 </dd>
+<dt id="xeggex.XeggeXClient.ws_get"><code class="name flex">
+<span>async def <span class="ident">ws_get</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, message: dict)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Sends and receives the websocket response or throws a WSException if an error happened.</p></div>
+</dd>
 <dt id="xeggex.XeggeXClient.ws_get_active_orders"><code class="name flex">
 <span>async def <span class="ident">ws_get_active_orders</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, symbol: str = None)</span>
 </code></dt>
@@ -610,7 +655,7 @@
 </dl></div>
 </dd>
 <dt id="xeggex.XeggeXClient.ws_get_trade_history"><code class="name flex">
-<span>async def <span class="ident">ws_get_trade_history</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, symbol: str, limit: Optional[int] = None, offset: Optional[int] = None, sort: Optional[str] = None, history_from: Optional[str] = None, history_till: Optional[str] = None)</span>
+<span>async def <span class="ident">ws_get_trade_history</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, symbol: str, limit: Optional[int] = None, offset: Optional[int] = None, sort: Optional[str] = None, history_from: Union[str, datetime.datetime, None] = None, history_till: Union[str, datetime.datetime, None] = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get trade history through a websocket.</p>
@@ -627,10 +672,10 @@
 <dt><strong><code>sort</code></strong></dt>
 <dd>'ASC' for ascending order, 'DESC' for decending order. (Optional, default: DESC)</dd>
 <dt><strong><code>history_from</code></strong></dt>
-<dd>This is earliest datetime. (Optional).
-When using from or till, then both are required.</dd>
+<dd>This is earliest datetime. Can be a datetime object or string formatted
+as <code>YYYY-MM-DDTH:MM:SSZ</code> (Optional). When using from or till, then both are required.</dd>
 <dt><strong><code>history_till</code></strong></dt>
-<dd>This is latest datetime. (Optional).
+<dd>This is latest datetime. Formatted the same as <code>history_from</code> (Optional).
 When using from or till, then both are required.</dd>
 </dl></div>
 </dd>
@@ -645,6 +690,12 @@ When using from or till, then both are required.</dd>
 <dd>Websocket response object.</dd>
 </dl></div>
 </dd>
+<dt id="xeggex.XeggeXClient.ws_listener"><code class="name flex">
+<span>async def <span class="ident">ws_listener</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A coroutine that listens on the websocket and dispatches the received messages to the queue.</p></div>
+</dd>
 <dt id="xeggex.XeggeXClient.ws_login"><code class="name flex">
 <span>async def <span class="ident">ws_login</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse)</span>
 </code></dt>
@@ -657,7 +708,7 @@ When using from or till, then both are required.</dd>
 </dl></div>
 </dd>
 <dt id="xeggex.XeggeXClient.ws_stream_generator"><code class="name flex">
-<span>async def <span class="ident">ws_stream_generator</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, message: str, response_methods: List[str])</span>
+<span>async def <span class="ident">ws_stream_generator</span></span>(<span>self, ws: aiohttp.client_ws.ClientWebSocketResponse, stream, **params)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates a stream subscribtion in a form of a generator.</p>
@@ -708,6 +759,7 @@ Allows you to drop some parts of the communication, like the initial snapshot.</
 <ul id="index">
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
+<li><code><a title="xeggex.pop_none" href="#xeggex.pop_none">pop_none</a></code></li>
 <li><code><a title="xeggex.private" href="#xeggex.private">private</a></code></li>
 </ul>
 </li>
@@ -722,10 +774,18 @@ Allows you to drop some parts of the communication, like the initial snapshot.</
 </ul>
 </li>
 <li>
+<h4><code><a title="xeggex.WSException" href="#xeggex.WSException">WSException</a></code></h4>
+</li>
+<li>
+<h4><code><a title="xeggex.WSListenerContext" href="#xeggex.WSListenerContext">WSListenerContext</a></code></h4>
+</li>
+<li>
 <h4><code><a title="xeggex.XeggeXClient" href="#xeggex.XeggeXClient">XeggeXClient</a></code></h4>
 <ul class="">
 <li><code><a title="xeggex.XeggeXClient.cancel_market_orders" href="#xeggex.XeggeXClient.cancel_market_orders">cancel_market_orders</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.cancel_order" href="#xeggex.XeggeXClient.cancel_order">cancel_order</a></code></li>
+<li><code><a title="xeggex.XeggeXClient.close" href="#xeggex.XeggeXClient.close">close</a></code></li>
+<li><code><a title="xeggex.XeggeXClient.combine_streams" href="#xeggex.XeggeXClient.combine_streams">combine_streams</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.create_order" href="#xeggex.XeggeXClient.create_order">create_order</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.create_withdrawal" href="#xeggex.XeggeXClient.create_withdrawal">create_withdrawal</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.get" href="#xeggex.XeggeXClient.get">get</a></code></li>
@@ -762,6 +822,7 @@ Allows you to drop some parts of the communication, like the initial snapshot.</
 <li><code><a title="xeggex.XeggeXClient.websocket_context" href="#xeggex.XeggeXClient.websocket_context">websocket_context</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_cancel_order" href="#xeggex.XeggeXClient.ws_cancel_order">ws_cancel_order</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_create_order" href="#xeggex.XeggeXClient.ws_create_order">ws_create_order</a></code></li>
+<li><code><a title="xeggex.XeggeXClient.ws_get" href="#xeggex.XeggeXClient.ws_get">ws_get</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_get_active_orders" href="#xeggex.XeggeXClient.ws_get_active_orders">ws_get_active_orders</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_get_asset" href="#xeggex.XeggeXClient.ws_get_asset">ws_get_asset</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_get_assets_list" href="#xeggex.XeggeXClient.ws_get_assets_list">ws_get_assets_list</a></code></li>
@@ -769,6 +830,7 @@ Allows you to drop some parts of the communication, like the initial snapshot.</
 <li><code><a title="xeggex.XeggeXClient.ws_get_markets_list" href="#xeggex.XeggeXClient.ws_get_markets_list">ws_get_markets_list</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_get_trade_history" href="#xeggex.XeggeXClient.ws_get_trade_history">ws_get_trade_history</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_get_trading_balance" href="#xeggex.XeggeXClient.ws_get_trading_balance">ws_get_trading_balance</a></code></li>
+<li><code><a title="xeggex.XeggeXClient.ws_listener" href="#xeggex.XeggeXClient.ws_listener">ws_listener</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_login" href="#xeggex.XeggeXClient.ws_login">ws_login</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_stream_generator" href="#xeggex.XeggeXClient.ws_stream_generator">ws_stream_generator</a></code></li>
 <li><code><a title="xeggex.XeggeXClient.ws_subscribe_reports_generator" href="#xeggex.XeggeXClient.ws_subscribe_reports_generator">ws_subscribe_reports_generator</a></code></li>
