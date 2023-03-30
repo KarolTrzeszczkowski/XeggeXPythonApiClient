@@ -83,4 +83,10 @@ xeggex_settings.json format:
 ```
 ## Examples
 
+Run `immediate_or_cancel_example.py` according to the instruction in help. `python immediate_or_cancell_example.py --help`
 
+## Contrinuting
+Generate documentation: 
+```
+pdoc --html --output-dir docs --config show_source_code=False --force xeggex.py
+```
