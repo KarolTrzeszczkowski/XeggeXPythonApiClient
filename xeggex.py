@@ -605,9 +605,9 @@ class XeggeXClient():
         """Get market by symbol.
 
         Args:
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
-        path = f'/market/getbyid/{symbol}'
+        path = f'/market/getbysymbol/{symbol}'
         return await self.get(path)
 
     async def get_pools(self):
@@ -628,7 +628,7 @@ class XeggeXClient():
         """Get pool by symbol.
 
         Args:
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
         path = f'/pool/getbysymbol/{pool_symbol}'
         return await self.get(path)
@@ -637,7 +637,7 @@ class XeggeXClient():
         """Get market orderbook by symbol.
 
         Args:
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
         path = f'/market/getorderbookbysymbol/{symbol}'
         return await self.get(path)
@@ -692,7 +692,7 @@ class XeggeXClient():
         """Creates an order.
 
         Args:
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
             side: Order side, \"sell\" or \"buy\".
             quantity: Quantity of the base asset.
             price: Price in terms of the quote asset required for the limit order.
@@ -732,7 +732,7 @@ class XeggeXClient():
         """Cancel a batch of open orders in a spot market.
 
         Args:
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
             side: \"sell\", \"buy\" or \"all\".
         """
         path = '/cancelallorders'
@@ -820,7 +820,7 @@ class XeggeXClient():
             status: Current status of orders. 'active', 'filled', or 'cancelled'.
             limit: Maximum limit is 500.
             skip: Skip this many records.
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
         path = '/getorders'
         params = {
@@ -841,7 +841,7 @@ class XeggeXClient():
         Args:
             limit: Maximum limit is 500.
             skip: Skip this many records.
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
         path = '/gettrades'
         params = {'limit':limit, 'skip':skip, 'symbol':symbol}
@@ -864,7 +864,7 @@ class XeggeXClient():
             since: A timestamp in milliseconds you want to retreive records after
             limit: Maximum limit is 500.
             skip: Skip this many records.
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
 
         path = '/gettradesince'
@@ -881,7 +881,7 @@ class XeggeXClient():
         Args:
             limit: Maximum limit is 500.
             skip: Skip this many records.
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
 
         path = '/getpooltrades'
@@ -905,7 +905,7 @@ class XeggeXClient():
             since: A timestamp in milliseconds you want to retreive records after
             limit: Maximum limit is 500.
             skip: Skip this many records.
-            symbol: Market symbol, two tickers joined with a \"/\". For example \"XRG/LTC\".
+            symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
 
 
