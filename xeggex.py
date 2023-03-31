@@ -119,6 +119,7 @@ class WSListenerContext():
     async def __aenter__(self):
         ws = await self.ws.__aenter__()
         self.task = asyncio.create_task(self.listener(ws))
+        ws.listener_task = self.task
         return ws
 
     async def __aexit__(self, *exc):
@@ -182,17 +183,21 @@ class XeggeXClient():
         async with self.ws_lock:
             await ws.send_str(json.dumps(message))
         q, e = self.ws_responses[message['id']], self.ws_responses['error']
-        done, pending = await asyncio.wait(
-            [asyncio.create_task(q.get()), asyncio.create_task(e.get())],
-            return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait([
+            asyncio.create_task(q.get()),
+            asyncio.create_task(e.get()),
+            ws.listener_task
+        ], return_when=asyncio.FIRST_COMPLETED)
         d = done.pop()
+        if d.exception() is not None:
+            raise d.exception()
         if 'error' in d.result().keys():
             raise WSException(d.result()['error'])
         else:
             self.ws_responses.pop(message['id'])
             return d.result()
 
-    async def ws_listener(self, ws: ClientWebSocketResponse):
+    async def _ws_listener(self, ws: ClientWebSocketResponse):
         """A coroutine that listens on the websocket and dispatches the received messages to the queue.
         """
         while True:
@@ -210,29 +215,38 @@ class XeggeXClient():
                     else:
                         msg = msg_task.result()
                 await asyncio.sleep(0)
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                message = msg.json()
-                if 'id' in message.keys():
-                    await self.ws_responses[message['id']].put(message)
-                if 'method' in message.keys():
-                    for stream, values in subscriptions.items():
-                        if message['method'] in values['methods']:
-                            await self.ws_responses[stream].put(message)
-                            break
-                if 'error' in message.keys():
-                    await self.ws_responses['error'].put(message)
-                    print(message)
-            elif msg.type == aiohttp.WSMsgType.ERROR:
-                print(f"websocket connection closed with error {ws.exception()}")
-                return
-            elif msg.type == aiohttp.WSMsgType.CLOSED:
-                print(f"websocket connection closed.")
-                return
+            result = self._ws_parse_msg(ws, msg)
+            if not result:
+                raise WSException()
+
+
+    def _ws_parse_msg(self, ws, msg):
+        """Determines the type of ws message message and acts accor"""
+        if msg.type == aiohttp.WSMsgType.TEXT:
+            message = msg.json()
+            if 'method' in message.keys():
+                for stream, values in subscriptions.items():
+                    if message['method'] in values['methods']:
+                        self.ws_responses[stream].put_nowait(message)
+                        return True
+            if 'error' in message.keys():
+                self.ws_responses['error'].put_nowait(message)
+                print(message)
+                return True
+            if 'id' in message.keys():
+                self.ws_responses[message['id']].put_nowait(message)
+                return True
+        elif msg.type == aiohttp.WSMsgType.ERROR:
+            print(f"websocket connection closed with error {ws.exception()}")
+            return False
+        elif msg.type == aiohttp.WSMsgType.CLOSED:
+            print(f"websocket connection closed.")
+            return False
 
     def websocket_context(self):
         """Gets an entry point to a websocket, to be used with `async with ... as ws:`."""
         ws = self.session.ws_connect(self.ws_endpoint)
-        return WSListenerContext(ws, self.ws_listener)
+        return WSListenerContext(ws, self._ws_listener)
 
     async def ws_stream_generator(self, ws: ClientWebSocketResponse, stream, **params):
         """Creates a stream subscribtion in a form of a generator.
@@ -246,12 +260,21 @@ class XeggeXClient():
                 Allows you to drop some parts of the communication, like the initial snapshot.
         """
         message = subscriptions[stream]['message'](**params)
-        await ws.send_str(json.dumps(message))
+
+        self.sending_event.set()
+        async with self.ws_lock:
+            await ws.send_str(json.dumps(message))
+
         while True:
             q, e = self.ws_responses[stream], self.ws_responses['error']
-            done, pending = await asyncio.wait([asyncio.create_task(q.get()), asyncio.create_task(e.get())],
-                                         return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait([
+                asyncio.create_task(q.get()),
+                asyncio.create_task(e.get()),
+                ws.listener_task
+            ], return_when=asyncio.FIRST_COMPLETED)
             d = done.pop()
+            if d.exception() is not None:
+                raise d.exception()
             if 'error' in d.result().keys():
                 raise WSException(d.result()['error'])
             else:
