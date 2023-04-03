@@ -638,7 +638,7 @@ class XeggeXClient():
         path = '/pool/getlist'
         return await self.get(path)
 
-    async def get_pool_by_id(pool_id: str):
+    async def get_pool_by_id(self, pool_id: str):
         """Get pool by pool id.
 
         Args:
@@ -647,7 +647,7 @@ class XeggeXClient():
         path = f'/pool/getbyid/{pool_id}'
         return await self.get(path)
 
-    async def get_pool_by_symbol(pool_symbol: str):
+    async def get_pool_by_symbol(self, pool_symbol: str):
         """Get pool by symbol.
 
         Args:
@@ -656,7 +656,7 @@ class XeggeXClient():
         path = f'/pool/getbysymbol/{pool_symbol}'
         return await self.get(path)
 
-    async def get_orderbook_by_symbol(symbol: str):
+    async def get_orderbook_by_symbol(self, symbol: str):
         """Get market orderbook by symbol.
 
         Args:
@@ -665,7 +665,7 @@ class XeggeXClient():
         path = f'/market/getorderbookbysymbol/{symbol}'
         return await self.get(path)
 
-    async def get_orderbook_by_market_id(market_id: str):
+    async def get_orderbook_by_market_id(self, market_id: str):
         """Get market orderbook by market id.
 
         Args:
