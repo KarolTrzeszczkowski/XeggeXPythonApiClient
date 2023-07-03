@@ -2,10 +2,7 @@
 
 import json
 import hashlib, hmac
-try:
-    from urllib import urlencode
-except:
-    from urllib.parse import urlencode
+from urllib.parse import urlencode
 import string
 import random
 from time import time
@@ -16,11 +13,11 @@ from functools import wraps
 from itertools import count
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, List, Union
+from typing import Optional, List, Dict, Any, Union, Callable, Generator
 from collections import defaultdict
 from asyncio import Queue
 
-subscriptions = {
+subscriptions: Dict[str, Dict[str, Any]] = {
     "ticker": {
         "message": lambda symbol: {'method': 'subscribeTicker', 'params': {'symbol': symbol}},
         "methods": ['ticker']
@@ -48,7 +45,7 @@ subscriptions = {
 
 class Auth():
     """Authentication class that produces headers for api and login message for websocket."""
-    def __init__(self, access_key: str, secret_key: str):
+    def __init__(self, access_key: str, secret_key: str) -> None:
         super().__init__()
         self.secret_key = secret_key
         self.access_key = access_key
@@ -74,7 +71,7 @@ class Auth():
         }
         return headers
 
-    def ws_auth_message(self) -> str:
+    def ws_auth_message(self) -> dict:
         """Creates a login string for websocket."""
         nonce = ''.join(random.choice(string.ascii_letters+string.digits) for i in range(20))
         return {
@@ -87,7 +84,7 @@ class Auth():
             }
         }
 
-def private(func):
+def private(func: Callable) -> Callable:
     """Decorator for declaring functions that require API keys.
 
     A decorated function will throw an assertion error if API keys aren't placed in `xeggex_settings.json` file.
@@ -98,7 +95,7 @@ def private(func):
         return await func(*args, **kwargs)
     return wrap
 
-def pop_none(params):
+def pop_none(params: Dict) -> Dict:
     """A helper function that removes parameters with a None value"""
     par = params.copy().items()
     for key, value in par:
@@ -109,9 +106,12 @@ def pop_none(params):
 class WSException(Exception):
     pass
 
+class WSConnectionClosed(WSException):
+    pass
+
 class WSListenerContext():
     """Websocket listener context class, wraps the asyncio websocket context by adding a listener and removes it afterwards."""
-    def __init__(self, ws, listener_function):
+    def __init__(self, ws, listener_function: Callable) -> None:
         self.ws = ws
         self.listener = listener_function
         self.task = None
@@ -122,14 +122,15 @@ class WSListenerContext():
         ws.listener_task = self.task
         return ws
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, *exc) -> bool:
         self.task.cancel()
         await self.ws.__aexit__(*exc)
         return False
 
 class XeggeXClient():
     """The class that for accessing XeggeX exchange API."""
-    def __init__(self, settings_file = 'xeggex_settings.json'):
+    def __init__(self, settings_file: str = 'xeggex_settings.json') -> None:
+        self.auth: Optional[Auth]
         try:
             with open(settings_file) as f:
                 settings = json.load(f)
@@ -144,7 +145,7 @@ class XeggeXClient():
         self.ws_lock = asyncio.Lock()
         self.id = count(start=1)
 
-    async def close(self):
+    async def close(self) -> None:
         await self.session.close()
 
     async def get(self, path: str, params: dict = {}):
@@ -197,7 +198,7 @@ class XeggeXClient():
             self.ws_responses.pop(message['id'])
             return d.result()
 
-    async def _ws_listener(self, ws: ClientWebSocketResponse):
+    async def _ws_listener(self, ws: ClientWebSocketResponse) -> None:
         """A coroutine that listens on the websocket and dispatches the received messages to the queue.
         """
         while True:
@@ -220,7 +221,8 @@ class XeggeXClient():
                 raise WSException()
 
 
-    def _ws_parse_msg(self, ws, msg):
+
+    def _ws_parse_msg(self, ws, msg) -> bool:
         """Determines the type of ws message message and acts accor"""
         if msg.type == aiohttp.WSMsgType.TEXT:
             message = msg.json()
@@ -241,14 +243,19 @@ class XeggeXClient():
             return False
         elif msg.type == aiohttp.WSMsgType.CLOSED:
             print(f"websocket connection closed.")
-            return False
+            raise WSConnectionClosed()
+        elif msg.type == aiohttp.WSMsgType.CLOSE:
+            print(f"websocket connection close msg.")
+            raise WSConnectionClosed()
+        else:
+            print(f'Websocket unknown msg type {msg.type}')
 
-    def websocket_context(self):
+    def websocket_context(self) -> WSListenerContext:
         """Gets an entry point to a websocket, to be used with `async with ... as ws:`."""
         ws = self.session.ws_connect(self.ws_endpoint)
         return WSListenerContext(ws, self._ws_listener)
 
-    async def ws_stream_generator(self, ws: ClientWebSocketResponse, stream, **params):
+    async def ws_stream_generator(self, ws: ClientWebSocketResponse, stream, **params) -> Generator:
         """Creates a stream subscribtion in a form of a generator.
 
         The generator is meant to be iterated over with `async for` or `anext` builtin.
@@ -351,8 +358,8 @@ class XeggeXClient():
     async def ws_cancel_order(
         self,
         ws: ClientWebSocketResponse,
-        order_id: str = None,
-        user_provided_id: str = None
+        order_id: Optional[str] = None,
+        user_provided_id: Optional[str] = None
     ):
         """Cancel order through a websocket.
 
@@ -369,7 +376,7 @@ class XeggeXClient():
         return await self.ws_get(ws, message)
 
     @private
-    async def ws_get_active_orders(self, ws: ClientWebSocketResponse, symbol: str = None):
+    async def ws_get_active_orders(self, ws: ClientWebSocketResponse, symbol: Optional[str] = None):
         """Get active orders through a websocket.
 
         Args:
@@ -601,7 +608,7 @@ class XeggeXClient():
         path = f'/asset/getbyid/{asset_id}'
         return await self.get(path)
 
-    async def get_asset_by_id(self, ticker: str):
+    async def get_asset_by_ticker(self, ticker: str):
         """Get asset by ticker.
 
         Args:
@@ -890,7 +897,7 @@ class XeggeXClient():
             symbol: Market symbol, two tickers joined with a \"_\". For example \"XRG_LTC\".
         """
 
-        path = '/gettradesince'
+        path = '/gettradessince'
         params = {'since':since, 'limit':limit, 'skip':skip, 'symbol':symbol}
         pop_none(params)
         return await self.get(path, params)
