@@ -138,7 +138,7 @@ class XeggeXClient():
         except (FileNotFoundError, KeyError) as ex:
             self.auth = None
         self.endpoint = "https://xeggex.com/api/v2"
-        self.ws_endpoint = 'wss://ws.xeggex.com'
+        self.ws_endpoint = 'wss://api.xeggex.com'
         self.ws_responses = defaultdict(Queue)
         self.session = aiohttp.ClientSession()
         self.sending_event = asyncio.Event()
@@ -796,7 +796,7 @@ class XeggeXClient():
             "paymentId": payment_id
         }
         pop_none(data)
-        return self.post(path, data)
+        return await self.post(path, data)
 
     @private
     async def get_deposits(self, limit: int, skip: int, ticker: Optional[str] = None):
@@ -810,7 +810,7 @@ class XeggeXClient():
         path = '/getdeposits'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
         pop_none(params)
-        return self.get(path, params)
+        return await self.get(path, params)
 
     @private
     async def get_withdrawals(self, limit: int, skip: int, ticker: Optional[str] = None):
@@ -824,7 +824,7 @@ class XeggeXClient():
         path = '/getwithdrawals'
         params = { 'ticker': ticker, 'limit': limit, 'skip':skip }
         pop_none(params)
-        return self.get(path, params)
+        return await self.get(path, params)
 
     @private
     async def get_order(self, order_id: str):
